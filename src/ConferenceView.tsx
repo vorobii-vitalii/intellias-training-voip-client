@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from "react";
 import "./App.css";
-import { Inviter, Subscriber, UserAgent } from "sip.js";
+import {Inviter, Session, SessionDescriptionHandler, Subscriber, UserAgent} from "sip.js";
 import { Button, Card, Typography } from "antd";
 import { URI } from "sip.js/lib/core";
 import { SessionManager } from "sip.js/lib/platform/web";
 import { TSMap } from "typescript-map";
-import kurentoUtils from 'kurento-utils';
-import { queries } from "@testing-library/react";
 
 export interface ConferenceViewProps {
   conferenceAddressOfRecord: string;
@@ -14,10 +12,11 @@ export interface ConferenceViewProps {
   sessionManager: SessionManager;
   currentSipURI : string;
   onStreamReceive: (mediaStream : MediaStream) => void;
+  updateHandler: (handler : (session: Session) => void) => void
 }
 
 interface Participant {
-  sipURI: string;
+  participantKey: string;
   sdpOffer: string;
 }
 
@@ -34,15 +33,15 @@ function ConferenceView(props : ConferenceViewProps) {
   const onParticipantsUpdate = async (participants: Array<Participant>) => {
     const sdpAnswerByParticipant = new TSMap<string, string>();
     for (const participant of participants) {
-      if (participant.sipURI === props.currentSipURI) {
+      if (participant.participantKey === props.currentSipURI) {
         console.log("Skipping current SIP URI...");
         continue;
       }
-      if (participantsMap.has(participant.sipURI)) {
+      if (participantsMap.has(participant.participantKey)) {
         continue;
       }
-      console.log(`Connecting to ${participant.sipURI}`);
-      participantsMap.set(participant.sipURI, true);
+      console.log(`Connecting to ${participant.participantKey}`);
+      participantsMap.set(participant.participantKey, true);
       const rtcPeerConnection = new RTCPeerConnection({
         iceServers: [
           {
@@ -96,29 +95,11 @@ function ConferenceView(props : ConferenceViewProps) {
         }
       });
       const updatedDescription = rtcPeerConnection.localDescription;
-      console.log(`SDP answer = for ${participant.sipURI} before = ${descriptionInit.sdp} after = ${updatedDescription}`);
+      console.log(`SDP answer = for ${participant.participantKey} before = ${descriptionInit.sdp} after = ${updatedDescription}`);
       if (updatedDescription != null) {
-        sdpAnswerByParticipant.set(participant.sipURI, updatedDescription.sdp);
+        sdpAnswerByParticipant.set(participant.participantKey, updatedDescription.sdp);
       }
     }
-
-  //   navigator.mediaDevices.getDisplayMedia({
-  //     video: {
-  //     },
-  //     audio: {
-  //     }
-  //   })
-  //     .then(stream => {
-  //       var pc = session.sessionDescriptionHandler.peerConnection;
-  //       var videoTrack = stream.getVideoTracks()[0];
-  //       var sender = pc.getSenders().find(function(s) {
-  //         return s.track.kind == videoTrack.kind;
-  //       });
-  //       console.log('found sender:', sender);
-  //       sender.replaceTrack(videoTrack);
-  //     }, function(error){
-  //       console.log("error ", error);
-  //     });
     return sdpAnswerByParticipant;
   };
 
@@ -128,19 +109,68 @@ function ConferenceView(props : ConferenceViewProps) {
   }
 
   const onScreenShare = () => {
+    props.updateHandler((session : Session) => {
+      console.log("Handling session for screen sharing...");
+    });
+    let sessionDescriptionHandler : SessionDescriptionHandler;
     props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {
       delegate: {
-        onSessionDescriptionHandler(sessionDescriptionHandler, provisional) {
-        },
-      }
+        onSessionDescriptionHandler(handler, provisional) {
+          sessionDescriptionHandler = handler;
+        }
+      },
+      extraHeaders: [
+        "X-Disambiguator: screen-sharing",
+        "X-Receiving: false"
+      ]
     }, {
       requestOptions: {
+        extraHeaders: [
+            "X-Disambiguator: screen-sharing",
+            "X-Receiving: false"
+        ]
       },
       requestDelegate: {
         onAccept(response) {
-
+          console.log("Screen share accepted...");
         }
-      }
+      },
+      sessionDescriptionHandlerOptions: {
+        constraints: {
+          audio: true,
+          video: true
+        },
+      },
+      sessionDescriptionHandlerModifiers: [
+          init => {
+            if (init.type !== "offer") {
+              return Promise.resolve(init);
+            }
+            console.log("initial sdp = " + init.sdp);
+            const any : any = sessionDescriptionHandler;
+            const peerConnection: RTCPeerConnection = any._peerConnection as RTCPeerConnection;
+            console.log("Setup session description for screen sharing");
+            return navigator.mediaDevices.getDisplayMedia({video: true})
+                .then(streams => {
+                  const videoTrack = streams.getVideoTracks()[0];
+                  peerConnection.getSenders().forEach(function (s) {
+                    peerConnection.removeTrack(s);
+                  });
+                  peerConnection.addTrack(videoTrack);
+                  return peerConnection.createOffer({
+                    offerToReceiveAudio: false,
+                    offerToReceiveVideo: false
+                  });
+                }, function (error) {
+                  console.log("error ", error);
+                  throw error;
+                })
+                .then(v => {
+                  console.log("after sdp = " + v.sdp);
+                  return v
+                })
+          }
+      ]
     })
   };
 
@@ -194,6 +224,9 @@ function ConferenceView(props : ConferenceViewProps) {
   return (
     <Card key={props.conferenceAddressOfRecord.toString()} title={`Conference ${props.conferenceAddressOfRecord}`}>
       <Typography.Text>Joined...</Typography.Text>
+      <Button type="primary" onClick={e => {
+        onScreenShare();
+      }}>Start sharing</Button>
     </Card>
   );
 
