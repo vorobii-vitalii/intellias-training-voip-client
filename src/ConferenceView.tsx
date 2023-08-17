@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from "react";
 import "./App.css";
-import {Inviter, Session, SessionDescriptionHandler, Subscriber, UserAgent} from "sip.js";
+import {
+  BodyAndContentType,
+  Inviter,
+  Session,
+  SessionDescriptionHandler,
+  SessionDescriptionHandlerModifier, SessionDescriptionHandlerOptions,
+  Subscriber,
+  UserAgent
+} from "sip.js";
 import { Button, Card, Typography } from "antd";
 import { URI } from "sip.js/lib/core";
-import { SessionManager } from "sip.js/lib/platform/web";
+import {
+  defaultSessionDescriptionHandlerFactory,
+  MediaStreamFactory,
+  SessionManager
+} from "sip.js/lib/platform/web";
 import { TSMap } from "typescript-map";
 
 export interface ConferenceViewProps {
@@ -21,6 +33,7 @@ interface Participant {
 }
 
 const SIP_URI_PREFIX = "sip:";
+
 
 function ConferenceView(props : ConferenceViewProps) {
   const participantsMap: Map<String, boolean> = new Map<String, boolean>();
@@ -58,11 +71,16 @@ function ConferenceView(props : ConferenceViewProps) {
       rtcPeerConnection.onicecandidateerror = e => {
         console.log(`ice error ${e}`);
       };
-      rtcPeerConnection.ontrack = event => {
-        const track = event.track;
-        console.log(`On track ${track.kind}`);
-        props.onStreamReceive(event.streams[0]);
-      };
+      // rtcPeerConnection.ontrack = event => {
+      //   console.log(`On track from ${participant.participantKey} streams ${event.streams.length}`);
+      //   event.streams.forEach(v => {
+      //     console.log(`Stream ${v.id} ${v.active}`);
+      //     v.getTracks().forEach(t => {
+      //       console.log(`Track ${t.kind} ${t.enabled}`);
+      //     });
+      //   });
+      //   props.onStreamReceive(event.streams[0]);
+      // };
       rtcPeerConnection.onnegotiationneeded = e => {
         console.log("Negotiation is needed!");
       };
@@ -99,6 +117,11 @@ function ConferenceView(props : ConferenceViewProps) {
       if (updatedDescription != null) {
         sdpAnswerByParticipant.set(participant.participantKey, updatedDescription.sdp);
       }
+      const mediaStream = new MediaStream();
+      rtcPeerConnection.getReceivers().forEach(receiver => {
+        mediaStream.addTrack(receiver.track);
+      });
+      props.onStreamReceive(mediaStream);
     }
     return sdpAnswerByParticipant;
   };
@@ -111,18 +134,22 @@ function ConferenceView(props : ConferenceViewProps) {
   const onScreenShare = () => {
     props.updateHandler((session : Session) => {
       console.log("Handling session for screen sharing...");
+      const localMediaStream = props.sessionManager.getLocalMediaStream(session);
+      const remoteMediaStream = props.sessionManager.getRemoteMediaStream(session);
+      // if (localMediaStream != null) {
+      //   props.onStreamReceive(localMediaStream);
+      // }
     });
-    let sessionDescriptionHandler : SessionDescriptionHandler;
     props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {
-      delegate: {
-        onSessionDescriptionHandler(handler, provisional) {
-          sessionDescriptionHandler = handler;
-        }
-      },
       extraHeaders: [
         "X-Disambiguator: screen-sharing",
         "X-Receiving: false"
-      ]
+      ],
+      delegate: {
+        onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
+          console.log("Session description handler");
+        }
+      }
     }, {
       requestOptions: {
         extraHeaders: [
@@ -137,40 +164,11 @@ function ConferenceView(props : ConferenceViewProps) {
       },
       sessionDescriptionHandlerOptions: {
         constraints: {
-          audio: true,
-          video: true
+          audio: false,
+          video: false,
+          screenShare: true
         },
       },
-      sessionDescriptionHandlerModifiers: [
-          init => {
-            if (init.type !== "offer") {
-              return Promise.resolve(init);
-            }
-            console.log("initial sdp = " + init.sdp);
-            const any : any = sessionDescriptionHandler;
-            const peerConnection: RTCPeerConnection = any._peerConnection as RTCPeerConnection;
-            console.log("Setup session description for screen sharing");
-            return navigator.mediaDevices.getDisplayMedia({video: true})
-                .then(streams => {
-                  const videoTrack = streams.getVideoTracks()[0];
-                  peerConnection.getSenders().forEach(function (s) {
-                    peerConnection.removeTrack(s);
-                  });
-                  peerConnection.addTrack(videoTrack);
-                  return peerConnection.createOffer({
-                    offerToReceiveAudio: false,
-                    offerToReceiveVideo: false
-                  });
-                }, function (error) {
-                  console.log("error ", error);
-                  throw error;
-                })
-                .then(v => {
-                  console.log("after sdp = " + v.sdp);
-                  return v
-                })
-          }
-      ]
     })
   };
 
