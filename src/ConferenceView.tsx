@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import "./App.css";
 import {
-  BodyAndContentType,
+  BodyAndContentType, Info,
   Inviter,
   Session,
   SessionDescriptionHandler,
@@ -71,16 +71,6 @@ function ConferenceView(props : ConferenceViewProps) {
       rtcPeerConnection.onicecandidateerror = e => {
         console.log(`ice error ${e}`);
       };
-      // rtcPeerConnection.ontrack = event => {
-      //   console.log(`On track from ${participant.participantKey} streams ${event.streams.length}`);
-      //   event.streams.forEach(v => {
-      //     console.log(`Stream ${v.id} ${v.active}`);
-      //     v.getTracks().forEach(t => {
-      //       console.log(`Track ${t.kind} ${t.enabled}`);
-      //     });
-      //   });
-      //   props.onStreamReceive(event.streams[0]);
-      // };
       rtcPeerConnection.onnegotiationneeded = e => {
         console.log("Negotiation is needed!");
       };
@@ -133,6 +123,9 @@ function ConferenceView(props : ConferenceViewProps) {
 
   const onScreenShare = () => {
     props.updateHandler((session : Session) => {
+      // session.delegate && session.delegate.onInfo = info => {
+      //
+      // };
       console.log("Handling session for screen sharing...");
       const localMediaStream = props.sessionManager.getLocalMediaStream(session);
       const remoteMediaStream = props.sessionManager.getRemoteMediaStream(session);
@@ -140,6 +133,7 @@ function ConferenceView(props : ConferenceViewProps) {
       //   props.onStreamReceive(localMediaStream);
       // }
     });
+    let peerConnection: RTCPeerConnection | null = null;
     props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {
       extraHeaders: [
         "X-Disambiguator: screen-sharing",
@@ -148,13 +142,15 @@ function ConferenceView(props : ConferenceViewProps) {
       delegate: {
         onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
           console.log("Session description handler");
+          let obj: any = sessionDescriptionHandler;
+          peerConnection = obj.peerConnection as RTCPeerConnection;
         }
       }
     }, {
       requestOptions: {
         extraHeaders: [
-            "X-Disambiguator: screen-sharing",
-            "X-Receiving: false"
+          "X-Disambiguator: screen-sharing",
+          "X-Receiving: false"
         ]
       },
       requestDelegate: {
@@ -169,13 +165,39 @@ function ConferenceView(props : ConferenceViewProps) {
           screenShare: true
         },
       },
-    })
+    }).then(inviter => {
+      if (inviter.delegate) {
+        inviter.delegate.onInfo = (info : Info) => {
+          console.log(`Adding new ICE candidate... ${info.request.body}`);
+          peerConnection?.addIceCandidate({
+            candidate: info.request.body
+          });
+          info.accept();
+        };
+      }
+    });
   };
 
   const onConferenceJoin = () => {
     // Send invite to conference URI
-    props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {}, {
+    let peerConnection: RTCPeerConnection | null = null;
+    props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {
+      delegate: {
+        onInfo(info) {
+          console.log(`Adding new ICE candidate... ${info.request.body}`);
+          peerConnection?.addIceCandidate({
+            candidate: info.request.body
+          });
+        },
+        onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
+          let obj: any = sessionDescriptionHandler;
+          peerConnection = obj.peerConnection as RTCPeerConnection;
+          console.log(`Peer connection = ${peerConnection}`);
+        }
+      }
+    }, {
       requestDelegate: {
+
         onAccept(response) {
           console.log(`Successfully joined conference ${toRequestURI(props.conferenceAddressOfRecord)}`);
           const subscriber = createSubscriberOnConferenceEvents();
@@ -196,7 +218,7 @@ function ConferenceView(props : ConferenceViewProps) {
                     },
                     statusCode: 200
                   });
-                })
+                });
             }
           };
           subscriber.subscribe();
@@ -208,6 +230,16 @@ function ConferenceView(props : ConferenceViewProps) {
           audio: true,
           video: true
         }
+      }
+    }).then(inviter => {
+      if (inviter.delegate) {
+        inviter.delegate.onInfo = (info : Info) => {
+          console.log(`Adding new ICE candidate... ${info.request.body}`);
+          peerConnection?.addIceCandidate({
+            candidate: info.request.body
+          });
+          info.accept();
+        };
       }
     });
   };
