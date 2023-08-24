@@ -106,19 +106,19 @@ export function MainView(props: MainViewProps) {
         onCallAnswered: (session) => {
           // session.remoteIdentity.uri
           // session.info();
-          const remoteAddressOfRecord = session.remoteIdentity.uri.aor;
-          console.log(`Establishing session to ${remoteAddressOfRecord}...`);
-          const handler = handlerByRemoteURI.get(remoteAddressOfRecord);
-          if (handler) {
-            handler(session);
-          } else {
-            const localMediaStream = sessionManager.getLocalMediaStream(session);
-            const remoteMediaStream = sessionManager.getRemoteMediaStream(session);
-            console.log("Local media = " + localMediaStream);
-            console.log("Remote media = " + remoteMediaStream);
-            setLocalMedia(localMediaStream);
-            setRemoteMedia(remoteMediaStream);
-          }
+          // const remoteAddressOfRecord = session.remoteIdentity.uri.aor;
+          // console.log(`Establishing session to ${remoteAddressOfRecord}...`);
+          // const handler = handlerByRemoteURI.get(remoteAddressOfRecord);
+          // if (handler) {
+          //   handler(session);
+          // } else {
+          //   const localMediaStream = sessionManager.getLocalMediaStream(session);
+          //   const remoteMediaStream = sessionManager.getRemoteMediaStream(session);
+          //   console.log("Local media = " + localMediaStream);
+          //   console.log("Remote media = " + remoteMediaStream);
+          //   setLocalMedia(localMediaStream);
+          //   setRemoteMedia(remoteMediaStream);
+          // }
         },
         onCallReceived: (session) => {
           console.log("Call received");

@@ -1,30 +1,26 @@
-import React, { useEffect, useState } from "react";
+import React, { createRef, useState } from "react";
 import "./App.css";
 import {
-  BodyAndContentType, Info,
+  Info,
   Inviter,
   Session,
   SessionDescriptionHandler,
-  SessionDescriptionHandlerModifier, SessionDescriptionHandlerOptions,
   Subscriber,
   UserAgent
 } from "sip.js";
+import { Player } from 'video-react';
 import { Button, Card, Typography } from "antd";
 import { URI } from "sip.js/lib/core";
-import {
-  defaultSessionDescriptionHandlerFactory,
-  MediaStreamFactory,
-  SessionManager
-} from "sip.js/lib/platform/web";
+import { SessionManager } from "sip.js/lib/platform/web";
 import { TSMap } from "typescript-map";
 
 export interface ConferenceViewProps {
   conferenceAddressOfRecord: string;
   conferenceId: string;
   sessionManager: SessionManager;
-  currentSipURI : string;
-  onStreamReceive: (mediaStream : MediaStream) => void;
-  updateHandler: (handler : (session: Session) => void) => void
+  currentSipURI: string;
+  onStreamReceive: (mediaStream: MediaStream) => void;
+  updateHandler: (handler: (session: Session) => void) => void;
 }
 
 interface Participant {
@@ -32,12 +28,18 @@ interface Participant {
   sdpOffer: string;
 }
 
+interface ParticipantVideo {
+  refObject: React.RefObject<HTMLVideoElement>;
+  mediaStream: MediaStream;
+  name: string;
+}
+
 const SIP_URI_PREFIX = "sip:";
 
-
-function ConferenceView(props : ConferenceViewProps) {
+function ConferenceView(props: ConferenceViewProps) {
   const participantsMap: Map<String, boolean> = new Map<String, boolean>();
   const [isJoined, setJoined] = useState(false);
+  let [videoParticipants, setVideoParticipants] = useState<Array<ParticipantVideo>>([]);
 
   const toRequestURI = (uri: string) => {
     return SIP_URI_PREFIX + uri;
@@ -55,6 +57,7 @@ function ConferenceView(props : ConferenceViewProps) {
       }
       console.log(`Connecting to ${participant.participantKey}`);
       participantsMap.set(participant.participantKey, true);
+
       const rtcPeerConnection = new RTCPeerConnection({
         iceServers: [
           {
@@ -77,9 +80,9 @@ function ConferenceView(props : ConferenceViewProps) {
       await rtcPeerConnection.setRemoteDescription(new RTCSessionDescription({
         type: 'offer',
         sdp: participant.sdpOffer
-      }))
+      }));
       rtcPeerConnection.onconnectionstatechange = e => {
-        console.log(`Connection state changed ${e}`)
+        console.log(`Connection state changed ${e}`);
       };
       console.log("Creating answer...");
       const descriptionInit = await rtcPeerConnection.createAnswer({
@@ -107,11 +110,18 @@ function ConferenceView(props : ConferenceViewProps) {
       if (updatedDescription != null) {
         sdpAnswerByParticipant.set(participant.participantKey, updatedDescription.sdp);
       }
-      const mediaStream = new MediaStream();
+      const remoteMediaStream = new MediaStream();
       rtcPeerConnection.getReceivers().forEach(receiver => {
-        mediaStream.addTrack(receiver.track);
+        remoteMediaStream.addTrack(receiver.track);
       });
-      props.onStreamReceive(mediaStream);
+      // props.onStreamReceive(remoteMediaStream);
+      const videoElementRef = createRef<HTMLVideoElement>();
+      videoParticipants = [...videoParticipants, {
+        refObject: videoElementRef,
+        mediaStream: remoteMediaStream,
+        name: participant.participantKey
+      }];
+      setVideoParticipants(videoParticipants);
     }
     return sdpAnswerByParticipant;
   };
@@ -122,16 +132,10 @@ function ConferenceView(props : ConferenceViewProps) {
   }
 
   const onScreenShare = () => {
-    props.updateHandler((session : Session) => {
-      // session.delegate && session.delegate.onInfo = info => {
-      //
-      // };
+    props.updateHandler((session: Session) => {
       console.log("Handling session for screen sharing...");
       const localMediaStream = props.sessionManager.getLocalMediaStream(session);
       const remoteMediaStream = props.sessionManager.getRemoteMediaStream(session);
-      // if (localMediaStream != null) {
-      //   props.onStreamReceive(localMediaStream);
-      // }
     });
     let peerConnection: RTCPeerConnection | null = null;
     props.sessionManager.call(toRequestURI(props.conferenceAddressOfRecord), {
@@ -141,7 +145,7 @@ function ConferenceView(props : ConferenceViewProps) {
       ],
       delegate: {
         onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
-          console.log("Session description handler");
+          console.log("Session description handler (screen sharing)");
           let obj: any = sessionDescriptionHandler;
           peerConnection = obj.peerConnection as RTCPeerConnection;
         }
@@ -167,8 +171,8 @@ function ConferenceView(props : ConferenceViewProps) {
       },
     }).then(inviter => {
       if (inviter.delegate) {
-        inviter.delegate.onInfo = (info : Info) => {
-          console.log(`Adding new ICE candidate... ${info.request.body}`);
+        inviter.delegate.onInfo = (info: Info) => {
+          console.log(`Adding new ICE candidate... for screen sharing ${info.request.body}`);
           peerConnection?.addIceCandidate({
             candidate: info.request.body
           });
@@ -177,6 +181,21 @@ function ConferenceView(props : ConferenceViewProps) {
       }
     });
   };
+
+  let [subscriber, setSubscriber] = useState<Subscriber | null>(null);
+  let [inviterMain, setInviterMain] = useState<Inviter | null>(null);
+  let [inviterScreenShare, setInviterScreenShare] = useState<Inviter | null>(null);
+
+
+  function SrcObjectVideo({ srcObject } : {srcObject: MediaStream}){
+    const ref = createRef<HTMLVideoElement>();
+    React.useEffect(() => {
+       if (ref.current) {
+         ref.current.srcObject = srcObject;
+       }
+    }, [srcObject]);
+    return <video ref={ref} autoPlay={true} />
+  }
 
   const onConferenceJoin = () => {
     // Send invite to conference URI
@@ -193,15 +212,15 @@ function ConferenceView(props : ConferenceViewProps) {
           let obj: any = sessionDescriptionHandler;
           peerConnection = obj.peerConnection as RTCPeerConnection;
           console.log(`Peer connection = ${peerConnection}`);
+
         }
       }
     }, {
       requestDelegate: {
-
         onAccept(response) {
           console.log(`Successfully joined conference ${toRequestURI(props.conferenceAddressOfRecord)}`);
-          const subscriber = createSubscriberOnConferenceEvents();
-          subscriber.delegate = {
+          const createdSubscriber = createSubscriberOnConferenceEvents();
+          createdSubscriber.delegate = {
             onNotify: (notification) => {
               const participants = JSON.parse(notification.request.body) as Array<Participant>;
               console.log(`Participants list = ${participants}`);
@@ -221,7 +240,8 @@ function ConferenceView(props : ConferenceViewProps) {
                 });
             }
           };
-          subscriber.subscribe();
+          createdSubscriber.subscribe();
+          setSubscriber(createdSubscriber);
           setJoined(true);
         }
       },
@@ -232,8 +252,9 @@ function ConferenceView(props : ConferenceViewProps) {
         }
       }
     }).then(inviter => {
+      setInviterMain(inviter);
       if (inviter.delegate) {
-        inviter.delegate.onInfo = (info : Info) => {
+        inviter.delegate.onInfo = (info: Info) => {
           console.log(`Adding new ICE candidate... ${info.request.body}`);
           peerConnection?.addIceCandidate({
             candidate: info.request.body
@@ -244,19 +265,42 @@ function ConferenceView(props : ConferenceViewProps) {
     });
   };
 
+  const leaveConference = () => {
+    subscriber && subscriber.unsubscribe();
+    inviterMain && inviterMain.bye();
+  };
+
   if (!isJoined) {
     return (
-      <Card key={props.conferenceAddressOfRecord.toString()} title={`Conference ${props.conferenceAddressOfRecord}`}>
-        <Button type="primary" onClick={e => onConferenceJoin()}>Join conference</Button>
+      <Card key={props.conferenceAddressOfRecord.toString()}
+            title={`Conference ${props.conferenceAddressOfRecord}`}>
+        <Button type="primary" onClick={e => onConferenceJoin()}>Join
+          conference</Button>
       </Card>
     );
   }
   return (
-    <Card key={props.conferenceAddressOfRecord.toString()} title={`Conference ${props.conferenceAddressOfRecord}`}>
-      <Typography.Text>Joined...</Typography.Text>
+    <Card key={props.conferenceAddressOfRecord.toString()}
+          title={`Conference ${props.conferenceAddressOfRecord}`}>
+      <Typography.Text>Participants</Typography.Text>
+      {
+        videoParticipants.map((v, i) => {
+          return (
+            // <Player>
+            //   <source src={URL.createObjectURL(v.mediaStream as unknown as Blob)} />
+            // </Player>
+            <Card title={v.name} key={v.name}>
+              <SrcObjectVideo srcObject={v.mediaStream} key={v.name} />
+            </Card>
+          );
+        })
+      }
       <Button type="primary" onClick={e => {
         onScreenShare();
       }}>Start sharing</Button>
+      <Button type="dashed" onClick={e => {
+        leaveConference();
+      }}>Leave</Button>
     </Card>
   );
 

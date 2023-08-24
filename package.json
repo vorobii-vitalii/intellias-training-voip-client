@@ -18,7 +18,8 @@
     "sip.js": "^0.21.2",
     "antd": "^5.8.1",
     "typescript-map": "^0.1.0",
-    "kurento-utils": "^7.0.0"
+    "kurento-utils": "^7.0.0",
+    "video-react": "^0.16.0"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -46,7 +47,8 @@
     ]
   },
   "devDependencies": {
-    "@types/kurento-utils": "^6.7.1"
+    "@types/kurento-utils": "^6.7.1",
+    "@types/video-react": "^0.15.1"
   },
   "pre-commit": [
     "lint",
