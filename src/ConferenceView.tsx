@@ -32,14 +32,14 @@ interface ParticipantVideo {
   refObject: React.RefObject<HTMLVideoElement>;
   mediaStream: MediaStream;
   name: string;
+  peerConnection: RTCPeerConnection;
 }
 
 const SIP_URI_PREFIX = "sip:";
 
 function ConferenceView(props: ConferenceViewProps) {
-  const participantsMap: Map<String, boolean> = new Map<String, boolean>();
+  const [participantsMap, setParticipantMap] = useState(new Map<String, ParticipantVideo>());
   const [isJoined, setJoined] = useState(false);
-  let [videoParticipants, setVideoParticipants] = useState<Array<ParticipantVideo>>([]);
 
   const toRequestURI = (uri: string) => {
     return SIP_URI_PREFIX + uri;
@@ -47,17 +47,17 @@ function ConferenceView(props: ConferenceViewProps) {
 
   const onParticipantsUpdate = async (participants: Array<Participant>) => {
     const sdpAnswerByParticipant = new TSMap<string, string>();
+    const visited = new Set<String>();
     for (const participant of participants) {
       if (participant.participantKey === props.currentSipURI) {
         console.log("Skipping current SIP URI...");
         continue;
       }
+      visited.add(participant.participantKey);
       if (participantsMap.has(participant.participantKey)) {
         continue;
       }
       console.log(`Connecting to ${participant.participantKey}`);
-      participantsMap.set(participant.participantKey, true);
-
       const rtcPeerConnection = new RTCPeerConnection({
         iceServers: [
           {
@@ -84,7 +84,6 @@ function ConferenceView(props: ConferenceViewProps) {
       rtcPeerConnection.onconnectionstatechange = e => {
         console.log(`Connection state changed ${e}`);
       };
-      console.log("Creating answer...");
       const descriptionInit = await rtcPeerConnection.createAnswer({
         mediaConstraints: {
           audio: true,
@@ -116,13 +115,28 @@ function ConferenceView(props: ConferenceViewProps) {
       });
       // props.onStreamReceive(remoteMediaStream);
       const videoElementRef = createRef<HTMLVideoElement>();
-      videoParticipants = [...videoParticipants, {
+      participantsMap.set(participant.participantKey, {
         refObject: videoElementRef,
         mediaStream: remoteMediaStream,
-        name: participant.participantKey
-      }];
-      setVideoParticipants(videoParticipants);
+        name: participant.participantKey,
+        peerConnection: rtcPeerConnection
+      });
     }
+    const participantsIterator = participantsMap.entries();
+    let connectedParticipants = participantsIterator.next();
+    while (!connectedParticipants.done) {
+      const participant = connectedParticipants.value;
+      if (!visited.has(participant[0])) {
+        participant[1].peerConnection.close();
+        participantsMap.delete(participant[0]);
+      }
+      connectedParticipants = participantsIterator.next();
+    }
+    console.log(`Processed participants updated event...`);
+    participantsMap.forEach((v, k) => {
+      console.log(`Participant = ${k}`);
+    });
+    setParticipantMap(new Map(participantsMap));
     return sdpAnswerByParticipant;
   };
 
@@ -284,7 +298,7 @@ function ConferenceView(props: ConferenceViewProps) {
           title={`Conference ${props.conferenceAddressOfRecord}`}>
       <Typography.Text>Participants</Typography.Text>
       {
-        videoParticipants.map((v, i) => {
+        Array.from(participantsMap.values()).map((v, i) => {
           return (
             // <Player>
             //   <source src={URL.createObjectURL(v.mediaStream as unknown as Blob)} />
