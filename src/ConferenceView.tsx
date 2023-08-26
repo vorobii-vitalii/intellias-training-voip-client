@@ -5,10 +5,10 @@ import {
   Inviter,
   Session,
   SessionDescriptionHandler,
+  SessionState,
   Subscriber,
   UserAgent
 } from "sip.js";
-import { Player } from 'video-react';
 import { Button, Card, Typography } from "antd";
 import { URI } from "sip.js/lib/core";
 import { SessionManager } from "sip.js/lib/platform/web";
@@ -145,6 +145,8 @@ function ConferenceView(props: ConferenceViewProps) {
     return new Subscriber(props.sessionManager.userAgent, conferenceURI, "conference");
   }
 
+  let [inviterScreenShare, setInviterScreenShare] = useState<Inviter | null>(null);
+
   const onScreenShare = () => {
     props.updateHandler((session: Session) => {
       console.log("Handling session for screen sharing...");
@@ -184,6 +186,7 @@ function ConferenceView(props: ConferenceViewProps) {
         },
       },
     }).then(inviter => {
+      setInviterScreenShare(inviter);
       if (inviter.delegate) {
         inviter.delegate.onInfo = (info: Info) => {
           console.log(`Adding new ICE candidate... for screen sharing ${info.request.body}`);
@@ -198,17 +201,15 @@ function ConferenceView(props: ConferenceViewProps) {
 
   let [subscriber, setSubscriber] = useState<Subscriber | null>(null);
   let [inviterMain, setInviterMain] = useState<Inviter | null>(null);
-  let [inviterScreenShare, setInviterScreenShare] = useState<Inviter | null>(null);
 
-
-  function SrcObjectVideo({ srcObject } : {srcObject: MediaStream}){
+  function SrcObjectVideo({ srcObject }: { srcObject: MediaStream }) {
     const ref = createRef<HTMLVideoElement>();
     React.useEffect(() => {
-       if (ref.current) {
-         ref.current.srcObject = srcObject;
-       }
+      if (ref.current) {
+        ref.current.srcObject = srcObject;
+      }
     }, [srcObject]);
-    return <video ref={ref} autoPlay={true} />
+    return <video ref={ref} autoPlay={true} />;
   }
 
   const onConferenceJoin = () => {
@@ -280,11 +281,25 @@ function ConferenceView(props: ConferenceViewProps) {
   };
 
   const leaveConference = () => {
+    stopSharing();
     subscriber && subscriber.unsubscribe();
-    inviterMain && inviterMain.bye();
+    inviterMain && inviterMain?.state != SessionState.Terminated && inviterMain.bye();
+    setInviterMain(null);
   };
 
-  if (!isJoined) {
+  const stopSharing = () => {
+    inviterScreenShare && inviterScreenShare.bye({
+      requestOptions: {
+        extraHeaders: [
+          "X-Disambiguator: screen-sharing",
+          "X-Receiving: false"
+        ]
+      }
+    });
+    setInviterScreenShare(null)
+  };
+
+  if (!inviterMain) {
     return (
       <Card key={props.conferenceAddressOfRecord.toString()}
             title={`Conference ${props.conferenceAddressOfRecord}`}>
@@ -293,6 +308,19 @@ function ConferenceView(props: ConferenceViewProps) {
       </Card>
     );
   }
+  const inviterComponent = !inviterScreenShare ?
+    (
+      <Button type="primary" onClick={e => {
+        onScreenShare();
+      }}>Start sharing screen</Button>
+    )
+    :
+    (
+      <Button type="primary" onClick={e => {
+        stopSharing();
+      }}>Stop sharing screen</Button>
+    );
+
   return (
     <Card key={props.conferenceAddressOfRecord.toString()}
           title={`Conference ${props.conferenceAddressOfRecord}`}>
@@ -309,9 +337,7 @@ function ConferenceView(props: ConferenceViewProps) {
           );
         })
       }
-      <Button type="primary" onClick={e => {
-        onScreenShare();
-      }}>Start sharing</Button>
+      {inviterComponent}
       <Button type="dashed" onClick={e => {
         leaveConference();
       }}>Leave</Button>

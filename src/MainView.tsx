@@ -25,16 +25,6 @@ export interface MainViewProps {
   sipURI: string;
 }
 
-enum CallType {
-  CONFERENCE,
-  INITIATED,
-  RECEIVED
-}
-
-interface CallInfo {
-
-}
-
 interface CustomMediaStreamConstraints extends MediaStreamConstraints {
   screenShare: boolean;
 }
@@ -71,12 +61,13 @@ export function MainView(props: MainViewProps) {
             return Promise.reject(new Error("Media devices not available in insecure contexts."));
           }
           const constraints = c as CustomMediaStreamConstraints;
-          // Handle factory URI
           console.log("Session description handling " + JSON.stringify(constraints));
-          // Share screen mode
           if (constraints.screenShare) {
             console.log("Get screen capture");
             return navigator.mediaDevices.getDisplayMedia();
+          }
+          if (!constraints.video && !constraints.audio) {
+            return Promise.resolve(new MediaStream());
           }
           console.log("Normal flow");
           return navigator.mediaDevices.getUserMedia.call(navigator.mediaDevices, constraints);
@@ -257,6 +248,12 @@ export function MainView(props: MainViewProps) {
         onClick={e => {
           console.log("Creating conference");
           sessionManager.call(CONFERENCE_FACTORY_URI, {}, {
+            sessionDescriptionHandlerOptions: {
+              constraints: {
+                audio: false,
+                video: false,
+              }
+            },
             requestDelegate: {
               onRedirect(response) {
                 const conferenceURI = getRedirectContact(response);
